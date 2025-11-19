@@ -90,8 +90,6 @@ def fpc_fast(pos, gwtheta, gwphi):
 
     return fplus, fcross # Both are (N,M)
 
-
-
 # Utility functions for other methods
 def spherical2cartesian(theta, phi):
     """Convert spherical coordinates to unit-radius Cartesian coordinates.
@@ -171,8 +169,6 @@ def matrix2pairs(M):
 
     return Mprime
 
-
-
 def get_pixel_power_basis(pos, nside=16):
 
     npsr = pos.shape[0]
@@ -220,6 +216,170 @@ def get_pixel_strain_basis(pos, nside=16):
     F = F * jnp.sqrt(3/(2*npix)) # (npsr, 2*npix)
 
     return F  # Shape (npsr, 2*npix)
+
+def clm2alm(clm):
+    """
+    Given an array of clm values, return an array of complex alm valuex
+
+    PORT FROM ENTERPRISE.ANIS_COEFFICIENTS
+    Given an array of clm values, return an array of complex alm valuex
+
+    Note: There is a bug in healpy for the negative m values. This function
+    just takes the imaginary part of the abs(m) alm index.
+
+    Parameters
+    -----------
+    clm : array
+        array of clm values
+
+    Returns
+    -------
+    alm : array
+        array of complex alm values
+    """
+    maxl = int(np.sqrt(len(clm))) - 1
+
+    nalm = hp.Alm.getsize(maxl)
+    alm = np.zeros((nalm), dtype=np.complex128)
+
+    clmindex = 0
+    for ll in range(0, maxl + 1):
+        for mm in range(-ll, ll + 1):
+            almindex = hp.Alm.getidx(maxl, ll, abs(mm))
+
+            if mm == 0:
+                alm[almindex] += clm[clmindex]
+            elif mm < 0:
+                alm[almindex] -= 1j * clm[clmindex] / np.sqrt(2)
+            elif mm > 0:
+                alm[almindex] += clm[clmindex] / np.sqrt(2)
+
+            clmindex += 1
+
+    return alm
+
+def clm2map(clm, nside):
+    """
+    generate a healpix map from clm coefficients.
+
+    PORT FROM ENTERPRISE.ANIS_COEFFICIENTS
+
+    Given an array of C_{lm} values, produce a pixel-power-map (non-Nested) for
+    healpix pixelation with nside
+
+    Parameters
+    ----------
+    clm : array
+        Array of C_{lm} values (inc. 0,0 element)
+    nside : int
+        Nside of the healpix pixelation (resolution parameter)
+
+    Returns
+    -------
+    h : array
+        Healpix pixels to be used with healpy functions
+    """
+    maxl = int(np.sqrt(len(clm))) - 1
+    alm = clm2alm(clm)
+
+    h = hp.alm2map(alm, nside, maxl, verbose=False)
+
+    return h
+
+def alm2clm(alm):
+    """
+    Given an array of complex alm values, return an array of clm values
+
+    PORT FROM ENTERPRISE.ANIS_COEFFICIENTS
+
+    Note: There is a bug in healpy for the negative m values. This function
+    just takes the imaginary part of the abs(m) alm index.
+    Parameters
+    -----------
+    alm : array
+        array of complex alm values
+
+    Returns
+    -------
+    clm : array
+        array of clm values
+    """
+    nalm = len(alm)
+    maxl = int(np.sqrt(9.0 - 4.0 * (2.0 - 2.0 * nalm)) * 0.5 - 1.5)  # Really?
+    nclm = (maxl + 1) ** 2
+
+    # Check the solution. Went wrong one time..
+    if nalm != int(0.5 * (maxl + 1) * (maxl + 2)):
+        raise ValueError("Check numerical precision. This should not happen")
+
+    clm = np.zeros(nclm)
+
+    clmindex = 0
+    for ll in range(0, maxl + 1):
+        for mm in range(-ll, ll + 1):
+            almindex = hp.Alm.getidx(maxl, ll, abs(mm))
+
+            if mm == 0:
+                clm[clmindex] = alm[almindex].real
+            elif mm < 0:
+                clm[clmindex] = -alm[almindex].imag * np.sqrt(2)
+            elif mm > 0:
+                clm[clmindex] = alm[almindex].real * np.sqrt(2)
+
+            clmindex += 1
+
+    return clm
+
+
+def get_linspharm_basis(pos, lmax, nside=16):
+    """generate the linear spherical harmonic basis based on etahat direction
+    
+    etahat: origin to GW source
+    khat: GW propagation direction
+    enterprise_anis_coefficients.anis_basis uses khat to form the basis.
+    to get an orf for a given set of clm values, it is simply: clm @ basis
+
+    Parameters
+    ----------
+    pos : array
+        array of pulsar positions shape (Npsr, 3)
+    lmax : _type_
+        lmax for spherical harmonic basis. The number of modes will be (lmax+1)^2
+    nside : int, optional
+        healpy resolution of sky (used for making pixel power basis), by default 16
+
+    Returns
+    -------
+    basis : array
+        array of shape (Nmodes, Npsr, Npsr) where Nmodes = (lmax+1)^2
+        
+    """
+    npix = hp.nside2npix(nside)
+    npsrs = pos.shape[0]
+
+    # LSS get pixel power basis for pta
+    R = get_pixel_power_basis(pos, nside)
+
+    # LSS getting theta phi for entire sky (etahat direction)
+    skypix = hp.pix2ang(nside, jnp.arange(npix), nest=False)
+    gwtheta = skypix[0]
+    gwphi = skypix[1]
+
+    # LSS loop over (l, m)
+    basis = []
+    nclm = (lmax + 1)**2 
+    clm_idx = 0
+    for ll in range(0, lmax+1): # LSS lmax+1 to get lmax included
+        for mm in range(-ll, ll+1):
+            clm = np.zeros(nclm)
+            clm[clm_idx] = 1.0 
+            skymap = clm2map(clm, nside) # LSS make skymap for idx mode
+            orf = R.T @ skymap # LSS make ORF from that spharm mode
+            # LSS pulsar term is included in R already - see get_pixel_power_basis
+            basis.append(orf)
+            clm_idx += 1 # LSS move to next spharm mode
+
+    return jnp.array(basis) # Nmodes, Npsr, Npsr
 
 
 
