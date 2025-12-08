@@ -1,4 +1,5 @@
 import jax.numpy as jnp
+import typing
 import numpy as np
 import healpy as hp
 import scipy.special as ss
@@ -472,7 +473,7 @@ def get_linspharm_orf(pos, lmax, nside=16):
     # matrix
 
     @jax.jit
-    def linsph_orf(pos1, pos2, clm):
+    def linsph_orf(pos1, pos2, clm: typing.Sequence):
         """
         return orf for given clm values in linear spherical harmonic basis
 
