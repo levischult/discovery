@@ -151,22 +151,23 @@ def pairs2matrix(M):
     nbasis = M.shape[1] # number of basis functions
     npsr = int(jnp.sqrt(0.25 + 2*npair) - 0.5) # Smaller root of quadratic formula
 
-    Mprime = jnp.zeros((nbasis, npsr, npsr))
+    Mprime = jnp.zeros((npsr, npsr, nbasis))
     a,b = jnp.triu_indices(npsr, k=0)
-    Mprime = Mprime.at[:, a, b].set(M.T)
-    Mprime = Mprime.at[:, b, a].set(M.T)
+    Mprime = Mprime.at[a, b, :].set(M)
+    Mprime = Mprime.at[b, a, :].set(M)
 
     return Mprime
 
 
 def matrix2pairs(M):
-    # M has shape (N, npsr, npsr) -> return Mp with (npairs, N)
+    # M has shape (npsr, npsr, N) -> return Mp with (npairs, N)
     npsr = M.shape[1]
-    nbasis = M.shape[0]
+    nbasis = M.shape[-1]
     npair = npsr*(npsr+1)//2
 
+    Mprime = jnp.zeros((npair, nbasis))
     a,b = jnp.triu_indices(npsr, k=0)
-    Mprime = Mprime.at[:, :].set(M[:, a, b].T)
+    Mprime = Mprime.at[:, :].set(M[a, b, :].T)
 
     return Mprime
 
@@ -190,11 +191,11 @@ def get_pixel_power_basis(pos, nside=16):
     R = R * 3/(2*npix) # (Npairs, npix)
 
     # Convert to square covariance matrix
-    Rcov = pairs2matrix(R)  # Shape (npix, npsr, npsr)
+    Rcov = pairs2matrix(R)  # Shape (npsr, npsr, npix)
 
     # Double the diagonal elements for pulsar term
     idx = jnp.arange(npsr)
-    Rcov = Rcov.at[:, idx, idx].set(2*Rcov[:, idx, idx])
+    Rcov = Rcov.at[idx, idx, :].set(2*Rcov[idx, idx, :])
 
     return Rcov  # Shape (npix, npsr, npsr)
 
@@ -265,7 +266,7 @@ def get_radiometer_orf(pos, nside=16):
         gwtheta = jnp.arccos(gwcostheta) # correcting for sampling in costheta
         # LSS get etahat pixel index
         etahat_pidx = jhp.ang2pix(nside=nside, theta=gwtheta, phi=gwphi)
-        return R[etahat_pidx, :, :]
+        return R[:, :, etahat_pidx]
     return radiometer_orf  
 
 def get_pixel_strain_basis(pos, nside=16):
@@ -443,7 +444,7 @@ def get_linspharm_basis(pos, lmax, nside=16):
             clm = np.zeros(nclm)
             clm[clm_idx] = 1.0 
             skymap = clm2map(clm, nside) # LSS make skymap for idx mode
-            orf = R.T @ skymap # LSS make ORF from that spharm mode
+            orf = R @ skymap # LSS make ORF from that spharm mode
             # LSS pulsar term is included in R already - see get_pixel_power_basis
             basis.append(orf)
             clm_idx += 1 # LSS move to next spharm mode
