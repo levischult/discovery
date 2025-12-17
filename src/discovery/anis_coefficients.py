@@ -8,7 +8,7 @@ import discovery.deterministic as dsd
 from time import time_ns
 import jax
 from jax.scipy import linalg as jsl
-import jax_healpy as jhp
+#import jax_healpy as jhp
 
 
 """
@@ -198,7 +198,7 @@ def get_pixel_power_basis(pos, nside=16):
     idx = jnp.arange(npsr)
     Rcov = Rcov.at[idx, idx, :].set(2*Rcov[idx, idx, :])
 
-    return Rcov  # Shape (npix, npsr, npsr)
+    return Rcov  # Shape (npsr, npsr, npix)
 
 def get_radiometer_orf(pos, nside=16):
     """
