@@ -354,7 +354,7 @@ def clm2map(clm, nside):
     maxl = int(np.sqrt(len(clm))) - 1
     alm = clm2alm(clm)
 
-    h = hp.alm2map(alm, nside, maxl, verbose=False)
+    h = hp.alm2map(alm, nside, maxl)
 
     return h
 
@@ -473,7 +473,7 @@ def get_linspharm_orf(pos, lmax, nside=16):
     # matrix
 
     @jax.jit
-    def linsph_orf(pos1, pos2, clm: typing.Sequence):
+    def linsph_orf(pos1, pos2, clm: typing.Sequence, c00):
         """
         return orf for given clm values in linear spherical harmonic basis
 
@@ -488,12 +488,65 @@ def get_linspharm_orf(pos, lmax, nside=16):
             pulsar 2 position (unused)
         clm : array
             linear spherical harmonic coefficients
+            shape will be ((lmax+1)^2)-1 
+        c00 : float, optional
+            value for c00 coefficient
+        Returns
+        -------
+        orf : array
+            overlap reduction function matrix, shape (Npsr, Npsr)
         """
-        orf = jnp.tensordot(clm, linsph_basis, axes=1) # Npsr, Npsr
+        fullclms = jnp.zeros((linsph_basis.shape[0],))
+        fullclms = fullclms.at[0].set(c00)
+        fullclms = fullclms.at[1:].set(clm)
+
+        orf = jnp.tensordot(fullclms, linsph_basis, axes=1) # Npsr, Npsr
         return orf
     return linsph_orf
 
+def get_pixel_orf(psrpos, nside=16):
+    """outer function to get orf for pixelated skymap.
 
+    call to initialize pixel power map that is then used in combination with 
+    pixel power parameters to generate an orf used for likelihood calculation
+
+    Parameters
+    ----------
+    psrpos : array
+        array of pulsar positions shape (Npsr, 3)
+    nside : int, optional
+        healpy nside parameter, by default 16
+
+    Returns
+    -------
+    pixel_orf : function
+        inner function that takes in pixel power map and returns orf matrix
+        shape (Npsr, Npsr) for given pixel power map
+    """
+    R = get_pixel_power_basis(psrpos, nside=nside) # shape (Npsr, Npsr, Npix)
+    @jax.jit
+    def pixel_orf(pos1, pos2, smap: typing.Sequence):
+        """returns overlap reduction function for a set of pixel powers provided
+
+        pos1, pos2 are useless parameters. this function returns the entire ORF
+        matrix. pos1, pos2 are to keep consistency with other orf functions.
+
+        Parameters
+        ----------
+        pos1 : array
+            pulsar 1 position (unused)
+        pos2 : array
+            pulsar 2 position (unused)
+        smap : typing.Sequence
+            pixel power map values, shape (Npix,)
+
+        Returns
+        -------
+        orf : array
+            overlap reduction function matrix, shape (Npsr, Npsr)
+        """
+        return R @ smap
+    return pixel_orf
 
 # Utility functions to keep doc comments when jitting
 def jit_method(func):
