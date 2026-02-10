@@ -8,7 +8,9 @@ import discovery.deterministic as dsd
 from time import time_ns
 import jax
 from jax.scipy import linalg as jsl
-#import jax_healpy as jhp
+import pandas as pd
+import re
+import jax_healpy as jhp
 
 
 """
@@ -233,7 +235,7 @@ def get_radiometer_orf(pos, nside=16):
     R = R * npix
 
     @jax.jit
-    def radiometer_orf(pos1, pos2, gwcostheta, gwphi):
+    def radiometer_orf(pos1, pos2, gwcostheta_gwphi : typing.Sequence):
         """
         return radiometer orf for a given set of gwcostheta and gwphi.
 
@@ -254,16 +256,17 @@ def get_radiometer_orf(pos, nside=16):
             pulsar 1 position, output from pulsar.pos -- NOT USED
         pos2 : array
             pulsar 2 position, output from pulsar.pos -- NOT USED
-        gwcostheta : array
-            cosine of the gravitational wave source polar angle
-        gwphi : array
-            phi of the gravitational wave source polar angle
+        gwcostheta_gwphi : array
+            cosine of the gravitational wave source polar angle and phi of the 
+            gravitational wave source polar angle
 
         Returns
         -------
         orf : array
             radiometer orf for the given sky location
         """
+        gwcostheta = gwcostheta_gwphi[0]
+        gwphi = gwcostheta_gwphi[1]
         gwtheta = jnp.arccos(gwcostheta) # correcting for sampling in costheta
         # LSS get etahat pixel index
         etahat_pidx = jhp.ang2pix(nside=nside, theta=gwtheta, phi=gwphi)
@@ -500,7 +503,8 @@ def get_linspharm_orf(pos, lmax, nside=16):
         fullclms = fullclms.at[0].set(c00)
         fullclms = fullclms.at[1:].set(clm)
 
-        orf = jnp.tensordot(fullclms, linsph_basis, axes=1) # Npsr, Npsr
+        #orf = jnp.tensordot(fullclms, linsph_basis, axes=1) # Npsr, Npsr
+        orf = jnp.einsum('i,ijk->jk', fullclms, linsph_basis) # Npsr, Npsr
         return orf
     return linsph_orf
 
@@ -547,6 +551,126 @@ def get_pixel_orf(psrpos, nside=16):
         """
         return R @ smap
     return pixel_orf
+
+
+# LSS this really shouldn't be here but I need to save it somewhere
+def npyrosamples2pddf(samples, special_pars=None):
+    """convert numpyro samples dict to pandas dataframe. Handles special parameters that are arrays.
+
+    Parameters
+    ----------
+    samples : dict
+        Dictionary of numpyro samples. e.g. samples = mcmc.get_samples()
+    special_pars : list of strings, optional
+        List of parameter names that are arrays e.g. gw_clm(8), by default None
+    Returns
+    -------
+    pdsamp : pandas.DataFrame
+        DataFrame of samples with special parameters expanded into individual columns.
+    """
+    parsamp = list(samples['params'].keys())
+    if special_pars is not None:
+        [parsamp.remove(sp) for sp in special_pars]
+    holddict = {par: samples['params'][par] for par in parsamp}
+    pdsamp = pd.DataFrame.from_dict(holddict)
+    if special_pars is not None:
+        for sp in special_pars:
+            regsrch = re.search(r'\([0-9]+\)', sp)
+            if regsrch is not None:
+                n_sp = regsrch.group()
+                n_sp = int(n_sp[1:-1])
+                trimparname = re.sub(r'\([0-9]+\)', '', sp)
+            else:
+                raise Exception('Number of params in array not specified.\nParameters expected to have form param_name(N) if in array.')
+            for i in range(n_sp):
+                pdsamp[f'{trimparname}({i})'] = samples['params'][sp][:, i]
+    return pdsamp
+
+def lmax2l_order(lmax=6):
+    """returns list of clm indices grouped by l (lm_index) and list of clms denoted by l (l_order)
+
+    Parameters
+    ----------
+    lmax : int, optional
+        Maximum spherical harmonic degree, by default 6
+
+    Returns
+    -------
+    l_order : list
+        List of clm indices denoted by l
+    lm_index : list
+        List of arrays of clm indices grouped by l
+    """
+    l_order = [] # LSS len = (lmax+1)**2 -1 with entries = l each clm corresponds to
+    for l in range(1, lmax+1):
+        '''lots of l+1s because range or arange does not include last number'''
+        l_order += len(np.arange(-l, l+1))  * [l]
+    lm_index = [] #LSS making list that has indices for clms separated by l
+    for l in range(1, lmax+1):
+        lm_index.append(np.array(np.where(np.array(l_order) == l)[0]))
+    return l_order, lm_index
+
+def clm2angpowspec(clms, lmax):
+    """Compute angular power spectrum from clm coefficients.
+
+    Parameters
+    ----------
+    clms : array-like
+        Array of clm coefficients.
+    lmax : int
+        Maximum spherical harmonic degree.
+
+    Returns
+    -------
+    angpowspec : array
+        Angular power spectrum.
+    """
+    l_order, lm_index = lmax2l_order(lmax=lmax)
+    angpowspec = np.zeros(lmax)
+    for l in range(1, lmax+1):
+        indices = lm_index[l-1]
+        angpowspec[l-1] = np.sum(clms[indices]**2) / (2*l + 1)
+    return angpowspec
+
+def map2clm(h, lmax):
+    """return clm values for a healpy skymap, given l max resolution parameter.
+
+    Parameters
+    ----------
+    h : array-like
+        Healpy skymap
+    lmax : int
+        Maximum spherical harmonic degree
+
+    Returns
+    -------
+    clms : array
+        Spherical harmonic coefficients up to lmax
+    """
+    alm = hp.sphtfunc.map2alm(h, lmax=lmax)
+    alm[0] = np.sum(h) * np.sqrt(4 * np.pi) / len(h)
+
+    return alm2clm(alm)
+
+def map2angpowspec(h, lmax):
+    """Compute angular power spectrum from a healpy skymap.
+
+    Parameters
+    ----------
+    h : array-like
+        Healpy skymap.
+    lmax : int
+        Maximum spherical harmonic degree.
+
+    Returns
+    -------
+    angpowspec : array
+        Angular power spectrum.
+    """
+    clms = map2clm(h, lmax)
+    angpowspec = clm2angpowspec(clms, lmax)
+    return angpowspec
+
 
 # Utility functions to keep doc comments when jitting
 def jit_method(func):
