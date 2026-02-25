@@ -170,7 +170,7 @@ def matrix2pairs(M):
 
     Mprime = jnp.zeros((npair, nbasis))
     a,b = jnp.triu_indices(npsr, k=0)
-    Mprime = Mprime.at[:, :].set(M[a, b, :].T)
+    Mprime = Mprime.at[:, :].set(M[a, b, :])
 
     return Mprime
 
@@ -552,6 +552,128 @@ def get_pixel_orf(psrpos, nside=16):
         return R @ smap
     return pixel_orf
 
+def get_principalmap_pixelbasis_orf(pos, n_sv=None, perc_sv=None, nside=16):
+    """outer function to define truncated principal map basis
+
+    call to initialize truncated principal map bases once then use inner func
+    to get orf for given basis amplitude values 
+
+    n_sv or perc_sv is required. cannot specify neither.
+
+    Parameters
+    ----------
+    pos : array
+        array of pulsar positions shape (Npsr, 3)
+    n_sv : int, optional
+        number of singular values to keep, by default None
+    perc_sv : _type_, optional
+        percentage of total variance you want to capture with your basis,
+        by default None
+    nside : int, optional
+        nside parameter for healpy pixelization, by default 16
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    R = get_pixel_power_basis(pos, nside=nside)
+    Rpair = matrix2pairs(R)
+    Tp_pair, Vp = truncate_basis_SVD(Rpair, pair_representation=True, n_sv=n_sv, perc_sv=perc_sv)
+    Tp = pairs2matrix(Tp_pair)
+    @jax.jit
+    def principalmap_orf(pos1, pos2, amps : typing.Sequence):
+        orf = Tp@amps
+        return orf
+    return principalmap_orf, Vp
+    
+
+def get_principalmap_orf(fullbasis, n_sv=None, perc_sv=None):
+    """outer function to define truncated principal map basis
+
+    call to initialize truncated principal map bases once then use inner func
+    to get orf for given basis amplitude values 
+
+    n_sv or perc_sv is required. cannot specify neither.
+
+    Parameters
+    ----------
+    fullbasis : array
+        full basis matrix (e.g. pixel power basis) to be truncated with SVD 
+        shape (n_pairs, n_basis)
+    n_sv : int, optional
+        number of singular values to keep, by default None
+    perc_sv : _type_, optional
+        percentage of total variance you want to capture with your basis,
+        by default None
+    nside : int, optional
+        nside parameter for healpy pixelization, by default 16
+
+    Returns
+    -------
+    _type_
+        _description_
+    """
+    #R = dac.get_pixel_power_basis(pos, nside=nside)
+    if len(fullbasis.shape) != 2:
+        raise ValueError(f"fullbasis must be a 2D array with shape: npairs, nbasis. Got shape {fullbasis.shape}")
+    
+    Tp_pair, Vp = truncate_basis_SVD(fullbasis, n_sv=n_sv, perc_sv=perc_sv)
+    Tp = pairs2matrix(Tp_pair)
+    @jax.jit
+    def principalmap_orf(pos1, pos2, amps : typing.Sequence):
+        orf = Tp@amps
+        return orf
+    return principalmap_orf, Vp
+    
+
+# Eigenbasis and SVD functions--------------------------------------------------
+def compute_basis_SVD(T, pair_representation=False):
+    if pair_representation:
+        R = T  # Shape (npairs, nbasis)
+    else:
+        R = matrix2pairs(T)  # Shape (npairs, nbasis)
+
+    U,S,Vt = jnp.linalg.svd(R) 
+    # m = min(npairs, nbasis)
+    # U = (npairs, npairs), S = (m), (nbasis, nbasis)
+    # Trim both U and Vt to match S size
+    U, Vt = U[:,:S.size], Vt[:S.size,:] # U: (npairs, m), Vt: (m, nbasis)
+    return U, S, Vt # U: (npairs, m), S: (m), Vt: (m, nbasis)
+
+
+def truncate_basis_SVD(T, pair_representation=False, n_sv=None, perc_sv=None):
+    # n_sv is the number of singular values to keep
+    # perc_sv is the percentage of the total variance to keep
+    U,S,Vt = compute_basis_SVD(T, pair_representation=pair_representation)
+
+    if n_sv is None and perc_sv is None:
+        raise ValueError("Either n_sv or perc_sv must be provided.")
+    
+    if perc_sv is not None:
+        # Use percentage of variance
+        # The total variance is the sum of the squares of the singular values, 
+        # so we compute the cumulative variance ratio and find the number of singular 
+        # values needed to reach the desired percentage. 
+        cumsum_variance_ratio = jnp.cumsum(S**2) / jnp.sum(S**2)
+        n = len(cumsum_variance_ratio[cumsum_variance_ratio <= perc_sv])+1 
+        if n_sv is not None:
+            if n > n_sv:
+                n_sv = n
+            #n_sv = n if n < n_sv else n_sv # Cap at max n_sv if provided
+        else:
+            n_sv = n
+    
+    n_sv = min(n_sv, S.size) # Cap n_sv at the total number of singular values
+
+    # Use fixed number of singular values
+    Up = U[:, :n_sv]
+    Sp = S[:n_sv]
+    Vtp = Vt[:n_sv, :]
+    # Turn into Tprim and Vtprime
+    Tp = Up @ jnp.diag(Sp)  # Shape (npairs, n_sv)
+    Vtp = Vtp  # Shape (n_sv, nbasis)
+    return Tp, Vtp  # Tp: (npairs, n_sv), Vtp: (n_sv, nbasis)
 
 # LSS this really shouldn't be here but I need to save it somewhere
 def npyrosamples2pddf(samples, special_pars=None):
@@ -670,6 +792,34 @@ def map2angpowspec(h, lmax):
     clms = map2clm(h, lmax)
     angpowspec = clm2angpowspec(clms, lmax)
     return angpowspec
+
+def invert_pixel_map(pix_map):
+    """Invert a HEALPix pixel map from etahat to khat or vice versa.
+
+    This function takes a pixel map in either the etahat or khat representation
+    and returns the inverted map in the other representation.
+
+    Parameters
+    ----------
+    pix_map : array
+        The input pixel map in etahat or khat representation. Shape (npix)
+    
+    Returns
+    -------
+    jnp.ndarray
+        The inverted pixel map in the other representation. Shape (npix)
+    """
+    npix = pix_map.size
+    nside = hp.npix2nside(npix)
+
+    # Get x,y,z for each pixel
+    x,y,z = hp.pix2vec(nside, jnp.arange(npix))
+    # Invert the vectors
+    x_inv, y_inv, z_inv = -x, -y, -z
+    # Get the pixel indices for the inverted vectors
+    inv = hp.vec2pix(nside, x_inv, y_inv, z_inv)
+
+    return pix_map[inv]
 
 
 # Utility functions to keep doc comments when jitting
