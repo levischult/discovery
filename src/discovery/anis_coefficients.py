@@ -11,6 +11,7 @@ from jax.scipy import linalg as jsl
 import pandas as pd
 import re
 import jax_healpy as jhp
+import pickle as pkl
 
 
 """
@@ -707,6 +708,44 @@ def npyrosamples2pddf(samples, special_pars=None):
             for i in range(n_sp):
                 pdsamp[f'{trimparname}({i})'] = samples['params'][sp][:, i]
     return pdsamp
+
+def plot_pulsars(dataset, highlight=None, returnphitheta=False):
+    '''
+    plots pulsar positions from a dataset pkl 
+    if you want to save the pulsar positions, set returnphitheta=True
+    
+    inputs:
+    dataset (str): path to dataset
+    highlight (list): list of pulsar names as strings
+
+    outputs:
+    psrphis (array): phi of pulsars
+    psrthetas (array): theta of pulsars
+
+    usage:
+    psrphis, psrthetas = pulsarphitheta('location/of/dataset.pkl')
+    '''
+    # bringing in pulsars 
+    with open(dataset , 'rb') as ff:
+        psrs1 = pkl.load(ff)
+    # LSS getting psr locations
+    psrphis = np.array([psr.phi for psr in psrs1])
+    psrthts = np.array([psr.theta for psr in psrs1])
+    # LSS plotting
+    hp.visufunc.projscatter(psrthts, psrphis,
+                    marker='*',color='white',
+                    edgecolors='k',s=100)
+    if highlight is not None:
+        psrnames = [p.name for p in psrs1] # LSS highlight pulsars based on name
+        highlight_idx = []
+        for n in highlight:
+            highlight_idx.append(psrnames.index(n))
+        hp.visufunc.projscatter(np.array(psrthts)[highlight_idx], 
+                                np.array(psrphis)[highlight_idx],
+                    marker='*',color='yellow',
+                    edgecolors='k',s=100)
+    if returnphitheta:
+        return psrphis, psrthts
 
 def lmax2l_order(lmax=6):
     """returns list of clm indices grouped by l (lm_index) and list of clms denoted by l (l_order)
