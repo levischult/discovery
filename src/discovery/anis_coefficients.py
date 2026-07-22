@@ -12,6 +12,9 @@ import pandas as pd
 import re
 import jax_healpy as jhp
 import pickle as pkl
+import sys
+sys.path.append('/home/levis/play_disco/discovery/src/discovery')
+import clebschGordan as CG
 
 
 """
@@ -494,7 +497,7 @@ def get_linspharm_orf(pos, lmax, nside=16):
             linear spherical harmonic coefficients
             shape will be ((lmax+1)^2)-1 
         c00 : float, optional
-            value for c00 coefficient
+            value for c00 coefficient. usually set to sqrt(4*pi) for normalization
         Returns
         -------
         orf : array
@@ -508,6 +511,149 @@ def get_linspharm_orf(pos, lmax, nside=16):
         orf = jnp.einsum('i,ijk->jk', fullclms, linsph_basis) # Npsr, Npsr
         return orf
     return linsph_orf
+
+def hp_Alm_getidx(lmax, l, m):
+    r"""Returns index corresponding to (l,m) in an array describing alm up to lmax.
+
+    LSS - taken from healpy to bypass the fact that the rest of the Alm class isn't jaxified.
+
+    In HEALPix C++ and healpy, :math:`a_{lm}` coefficients are stored ordered by
+    :math:`m`. I.e. if :math:`\ell_{max}` is 16, the first 16 elements are
+    :math:`m=0, \ell=0-16`, then the following 15 elements are :math:`m=1, \ell=1-16`,
+    then :math:`m=2, \ell=2-16` and so on until the last element, the 153th, is
+    :math:`m=16, \ell=16`.
+
+    Parameters
+    ----------
+    lmax : int
+        The maximum l, defines the alm layout
+    l : int
+        The l for which to get the index
+    m : int
+        The m for which to get the index
+
+    Returns
+    -------
+    idx : int
+        The index corresponding to (l,m)
+    """
+    return m * (2 * lmax + 1 - m) // 2 + l
+
+def alm2clm(alm, lmax):
+    """A function to convert complex alm values to clm values.
+
+    PORT FROM ENTERPRISE.ANIS_COEFFICIENTS / MAPS + LSS JAXified
+    NOTE: There is a bug in healpy for the negative m values. This function
+    just takes the imaginary part of the abs(m) alm index.
+
+    Args:
+        alm (np.ndarray): An array of alm values.
+
+    Returns:
+        np.ndarray: An array of clm values.
+    """
+    #nalm = len(alm)
+    #maxl = int(np.sqrt(9.0 - 4.0 * (2.0 - 2.0 * nalm)) * 0.5 - 1.5)  # Really?
+    nclm = (lmax + 1) ** 2
+
+    # Check the solution. Went wrong one time..
+    #if nalm != int(0.5 * (maxl + 1) * (maxl + 2)):
+    #    raise ValueError("Check numerical precision. This should not happen")
+
+    clm = jnp.zeros(nclm)
+
+    clmindex = 0
+    for ll in range(0, lmax + 1):
+        for mm in range(-ll, ll + 1):
+            almindex = hp_Alm_getidx(lmax, ll, abs(mm))
+            if mm == 0:
+                clm = clm.at[clmindex].set(alm[almindex].real)
+                #clm[clmindex] = alm[almindex].real
+            elif mm < 0:
+                clm = clm.at[clmindex].set((-1) ** mm * alm[almindex].imag * np.sqrt(2))
+                #clm[clmindex] = (-1) ** mm * alm[almindex].imag * np.sqrt(2)
+            elif mm > 0:
+                clm = clm.at[clmindex].set((-1) ** mm * alm[almindex].real * np.sqrt(2))
+                #clm[clmindex] = (-1) ** mm * alm[almindex].real * np.sqrt(2)
+
+            clmindex += 1
+
+    return clm
+
+def get_sqrtspharm_orf(pos, lmax, nside=16):
+    """outer function to get sqrt spherical harmonic orf closure
+
+    call to initialize sqrt spherical harmonic basis once, then use inner 
+    function to get orf for given blm values, sampled in amplitude and phase.
+    a great deal of code and methodology comes from the Bayesian LISA Inference Package 
+    (BLIP) by Sharan Banagiri and Alexander Criswell and from the MAPS package by Nihan Pol.
+
+    Parameters
+    ----------
+    pos : array
+        array of pulsar positions shape (Npsr, 3)
+    lmax : int
+        lmax for spherical harmonic basis. The number of modes will be (lmax+1)^2
+    nside : int, optional
+        healpy nside parameter, by default 16
+    """
+    if lmax % 2 != 0:
+        raise ValueError("lmax must be even for sqrt spherical harmonic basis\nSee https://arxiv.org/abs/2103.00826 for details on why this is the case.")
+    # linsph_basis is shape: Nmodes, Npsr, Npsr
+    linsph_basis = get_linspharm_basis(pos, lmax, nside) 
+    sqrt_spharm_helper = CG.clebschGordan(blmax = int(lmax/2))
+    nblms = (lmax + 1)**2-1 # LSS removing the b00 mode.
+
+    @jax.jit
+    def sqrtsph_orf(pos1, pos2, blm_params: typing.Sequence):
+        """
+        return orf for given blm values in sqrt spherical harmonic basis
+
+        pos1, pos2 are unused here since basis is precomputed for all psr pairs.
+
+        Parameters
+        ----------
+        pos1 : float
+            pulsar 1 position (unused)
+        pos2 : float
+            pulsar 2 position (unused)
+        blm : array
+            sqrt spherical harmonic coefficients
+            shape will be 2*((lmax+1)^2)-1 amplitude and phase interleaved so b1-1 amp, b1-1 phase, etc etc
+        b00 : float, optional
+            value for b00 coefficient. usually set to 1.0 for normalization of the basis
+
+        Returns
+        -------
+        orf : array
+            overlap reduction function matrix, shape (Npsr, Npsr)
+        """
+        # LSS the grand schemes is:
+        # 1. convert the blm_params (separate amplitude and phase) to complex blm
+        # 2. convert the complex blm to complex alm (alm is the complex spherical harmonic coefficients)
+        # 3. convert the complex alm to real clm values (clm is the real spherical harmonic coefficients)
+        # 4. multiply the clm values by the precomputed linear spherical harmonic basis to get the orf
+
+        # 1. convert the blm_params (separate amplitude and phase) to complex blm
+        #b00 is set internally, no need to pass it in
+        blm = sqrt_spharm_helper.blm_params_2_blms(blm_params[1:])
+        print(blm.shape)
+        # 2. convert the complex blm to complex alm
+        alm = sqrt_spharm_helper.blm_2_alm(blm)
+
+        # 3. convert the complex alm to real clm values
+        clm = alm2clm(alm, lmax=lmax)
+
+        # 4. multiply the clm values by the precomputed linear spherical harmonic basis to get the orf
+        # LSS need to normalize so c00 is sqrt(4*pi) and the rest of the clm values are normalized accordingly
+        clm_norm = clm * (jnp.sqrt(4*jnp.pi) / clm[0])
+
+        orf = jnp.einsum('i,ijk->jk', clm_norm, linsph_basis) # Npsr, Npsr
+
+        return orf
+    return sqrtsph_orf
+
+
 
 def get_pixel_orf(psrpos, nside=16):
     """outer function to get orf for pixelated skymap.
@@ -726,8 +872,11 @@ def plot_pulsars(dataset, highlight=None, returnphitheta=False):
     psrphis, psrthetas = pulsarphitheta('location/of/dataset.pkl')
     '''
     # bringing in pulsars 
-    with open(dataset , 'rb') as ff:
-        psrs1 = pkl.load(ff)
+    try:
+        with open(dataset , 'rb') as ff:
+            psrs1 = pkl.load(ff)
+    except TypeError:
+        psrs1 = dataset # LSS if the dataset is already a list of pulsars, just use it directly
     # LSS getting psr locations
     psrphis = np.array([psr.phi for psr in psrs1])
     psrthts = np.array([psr.theta for psr in psrs1])
