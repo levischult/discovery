@@ -141,7 +141,8 @@ def makeglobalgp_fourier_specspat(psrs, priors, orfs, components, T, fourierbasi
             orfmap = orfmaps[pridx]
             if len(orf) == 1:
                 # LSS just get the argmap for the one ORF since a single spatial model 
-                orfmap = orfmaps[pridx][0] 
+                if len(orfmap) > 0: # LSS handling fixed ORF case.
+                    orfmap = orfmaps[pridx][0] 
                 singlefreq_orf = matrix.jnparray(orf[0](None, None, *[params[arg] for arg in orfmap]))
                 # LSS if one ORF for all freqs, duplicate to get nfreq, npsr, npsr shape
                 # LSS make it 1, npsr, npsr shape so we can repeat it.

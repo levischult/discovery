@@ -206,9 +206,9 @@ def get_pixel_power_basis(pos, nside=16):
 
     return Rcov  # Shape (npsr, npsr, npix)
 
-def get_radiometer_orf(pos, nside=16):
+def get_pixsearch_orf(pos, nside=16):
     """
-    outer function to initialize radiometer analysis of pixel power basis.
+    outer function to initialize pixel search via the power radiometer basis.
 
     once initialized, use inner function to get orf for any set of gwcostheta
     and gwphi values. 
@@ -239,7 +239,7 @@ def get_radiometer_orf(pos, nside=16):
     R = R * npix
 
     @jax.jit
-    def radiometer_orf(pos1, pos2, gwcostheta_gwphi : typing.Sequence):
+    def pixsearch_orf(pos1, pos2, gwcostheta_gwphi : typing.Sequence):
         """
         return radiometer orf for a given set of gwcostheta and gwphi.
 
@@ -275,7 +275,7 @@ def get_radiometer_orf(pos, nside=16):
         # LSS get etahat pixel index
         etahat_pidx = jhp.ang2pix(nside=nside, theta=gwtheta, phi=gwphi)
         return R[:, :, etahat_pidx]
-    return radiometer_orf  
+    return pixsearch_orf  
 
 def get_pixel_strain_basis(pos, nside=16):
     npsr = pos.shape[0]
@@ -588,6 +588,8 @@ def get_sqrtspharm_orf(pos, lmax, nside=16):
     a great deal of code and methodology comes from the Bayesian LISA Inference Package 
     (BLIP) by Sharan Banagiri and Alexander Criswell and from the MAPS package by Nihan Pol.
 
+    note! nparams = (lmax+1)^2-1 for this model. blm_size is the number of complex blms which includes b00.
+
     Parameters
     ----------
     pos : array
@@ -601,11 +603,11 @@ def get_sqrtspharm_orf(pos, lmax, nside=16):
         raise ValueError("lmax must be even for sqrt spherical harmonic basis\nSee https://arxiv.org/abs/2103.00826 for details on why this is the case.")
     # linsph_basis is shape: Nmodes, Npsr, Npsr
     linsph_basis = get_linspharm_basis(pos, lmax, nside) 
-    sqrt_spharm_helper = CG.clebschGordan(blmax = int(lmax/2))
+    sqrt_spharm_helper = CG.clebschGordan(blmax = lmax)
     nblms = (lmax + 1)**2-1 # LSS removing the b00 mode.
 
     @jax.jit
-    def sqrtsph_orf(pos1, pos2, blm_params: typing.Sequence):
+    def sqrtsph_orf(pos1, pos2, blm: typing.Sequence):
         """
         return orf for given blm values in sqrt spherical harmonic basis
 
@@ -618,10 +620,8 @@ def get_sqrtspharm_orf(pos, lmax, nside=16):
         pos2 : float
             pulsar 2 position (unused)
         blm : array
-            sqrt spherical harmonic coefficients
+            sqrt spherical harmonic coefficients. DO NOT PASS b00 ! 
             shape will be 2*((lmax+1)^2)-1 amplitude and phase interleaved so b1-1 amp, b1-1 phase, etc etc
-        b00 : float, optional
-            value for b00 coefficient. usually set to 1.0 for normalization of the basis
 
         Returns
         -------
@@ -636,8 +636,8 @@ def get_sqrtspharm_orf(pos, lmax, nside=16):
 
         # 1. convert the blm_params (separate amplitude and phase) to complex blm
         #b00 is set internally, no need to pass it in
-        blm = sqrt_spharm_helper.blm_params_2_blms(blm_params[1:])
-        print(blm.shape)
+        blm = sqrt_spharm_helper.blm_params_2_blms(blm)
+
         # 2. convert the complex blm to complex alm
         alm = sqrt_spharm_helper.blm_2_alm(blm)
 
@@ -1008,6 +1008,35 @@ def invert_pixel_map(pix_map):
     inv = hp.vec2pix(nside, x_inv, y_inv, z_inv)
 
     return pix_map[inv]
+
+def chain_skymap(phi, theta, nside, ct=False):
+    '''
+    makes an array of pixel values for healpy plotting from sky location posteriors
+
+    inputs:
+    phi (array/list): burned chain of phi samples from mcmc analysis
+    costheta (array/list): burned chain of costheta samples from mcmc analysis
+    nside (int): should be power of 2 - the resolution of output healpy map (12Nside**2)
+    ct (bool): default false - if you want to pass in costheta directly, set to True.
+
+    outputs:
+    skymap - an array of pixel values to be passed to hp.mollview or other proj.
+    '''
+    npix = hp.nside2npix(nside)
+
+    # convert to HEALPix indices
+    if ct:
+        indices = hp.ang2pix(nside, np.arccos(theta), phi)
+    else: indices = hp.ang2pix(nside, theta, phi)
+
+    idx, counts = np.unique(indices, return_counts=True)
+
+    # fill the fullsky map
+    hpx_map = np.zeros(npix, dtype=float)
+    normcts = counts / np.sum(counts) # LSS normalizing
+    hpx_map[idx] = normcts
+
+    return hpx_map
 
 
 # Utility functions to keep doc comments when jitting
