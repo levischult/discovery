@@ -12,8 +12,10 @@ import pandas as pd
 import re
 import jax_healpy as jhp
 import pickle as pkl
+import pathlib
 import sys
-sys.path.append('/home/levis/play_disco/discovery/src/discovery')
+sys.path.append(str(pathlib.Path(__file__).parent.resolve()))
+
 import clebschGordan as CG
 
 
