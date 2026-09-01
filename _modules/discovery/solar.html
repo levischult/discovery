@@ -522,11 +522,11 @@
 <div class="viewcode-block" id="make_solardmfourierbasis">
 <a class="viewcode-back" href="../../api/solar.html#discovery.solar.make_solardmfourierbasis">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">make_solardmfourierbasis</span><span class="p">(</span><span class="n">psr</span><span class="p">,</span> <span class="n">components</span><span class="p">,</span> <span class="n">T</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">"""</span>
 <span class="sd">    for a fourier basis for the solar wind gp. this assumes</span>
 <span class="sd">    that you include a deterministic solar wind delay, which samples</span>
 <span class="sd">    n_earth, and here these are stochastic fluctuations on top of that. </span>
-<span class="sd">    &quot;&quot;&quot;</span>
+<span class="sd">    """</span>
     <span class="n">f</span><span class="p">,</span> <span class="n">df</span><span class="p">,</span> <span class="n">fmat</span> <span class="o">=</span> <span class="n">ds</span><span class="o">.</span><span class="n">fourierbasis</span><span class="p">(</span><span class="n">psr</span><span class="p">,</span> <span class="n">components</span><span class="p">,</span> <span class="n">T</span><span class="p">)</span>
     <span class="n">shape</span> <span class="o">=</span> <span class="n">ds</span><span class="o">.</span><span class="n">make_solardm</span><span class="p">(</span><span class="n">psr</span><span class="p">)</span>
     <span class="k">return</span> <span class="n">f</span><span class="p">,</span> <span class="n">df</span><span class="p">,</span> <span class="n">fmat</span> <span class="o">*</span> <span class="n">shape</span><span class="p">(</span><span class="mf">1.</span><span class="p">)[:,</span> <span class="kc">None</span><span class="p">]</span></div>
@@ -535,17 +535,17 @@
 <div class="viewcode-block" id="theta_impact">
 <a class="viewcode-back" href="../../api/solar.html#discovery.solar.theta_impact">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">theta_impact</span><span class="p">(</span><span class="n">psr</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;From enterprise_extensions: use the attributes of an Enterprise</span>
+<span class="w">    </span><span class="sd">"""From enterprise_extensions: use the attributes of an Enterprise</span>
 <span class="sd">    Pulsar object to calculate the solar impact angle.</span>
 <span class="sd">    Returns solar impact angle (rad), distance to Earth (R_earth),</span>
-<span class="sd">    impact distance (b), perpendicular distance (z_earth).&quot;&quot;&quot;</span>
+<span class="sd">    impact distance (b), perpendicular distance (z_earth)."""</span>
 
     <span class="n">earth</span> <span class="o">=</span> <span class="n">psr</span><span class="o">.</span><span class="n">planetssb</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
     <span class="n">sun</span> <span class="o">=</span> <span class="n">psr</span><span class="o">.</span><span class="n">sunssb</span><span class="p">[:,</span> <span class="p">:</span><span class="mi">3</span><span class="p">]</span>
     <span class="n">earthsun</span> <span class="o">=</span> <span class="n">earth</span> <span class="o">-</span> <span class="n">sun</span>
 
-    <span class="n">R_earth</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">einsum</span><span class="p">(</span><span class="s1">&#39;ij,ij-&gt;i&#39;</span><span class="p">,</span> <span class="n">earthsun</span><span class="p">,</span> <span class="n">earthsun</span><span class="p">))</span>
-    <span class="n">Re_cos_theta_impact</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">einsum</span><span class="p">(</span><span class="s1">&#39;ij,ij-&gt;i&#39;</span><span class="p">,</span> <span class="n">earthsun</span><span class="p">,</span> <span class="n">psr</span><span class="o">.</span><span class="n">pos_t</span><span class="p">)</span>
+    <span class="n">R_earth</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">einsum</span><span class="p">(</span><span class="s1">'ij,ij-&gt;i'</span><span class="p">,</span> <span class="n">earthsun</span><span class="p">,</span> <span class="n">earthsun</span><span class="p">))</span>
+    <span class="n">Re_cos_theta_impact</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">einsum</span><span class="p">(</span><span class="s1">'ij,ij-&gt;i'</span><span class="p">,</span> <span class="n">earthsun</span><span class="p">,</span> <span class="n">psr</span><span class="o">.</span><span class="n">pos_t</span><span class="p">)</span>
 
     <span class="n">theta_impact</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arccos</span><span class="p">(</span><span class="o">-</span><span class="n">Re_cos_theta_impact</span> <span class="o">/</span> <span class="n">R_earth</span><span class="p">)</span>
     <span class="n">b</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">R_earth</span><span class="o">**</span><span class="mi">2</span> <span class="o">-</span> <span class="n">Re_cos_theta_impact</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
@@ -556,8 +556,8 @@
 <div class="viewcode-block" id="make_solardm">
 <a class="viewcode-back" href="../../api/solar.html#discovery.solar.make_solardm">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">make_solardm</span><span class="p">(</span><span class="n">psr</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;From enterprise_extensions: calculate DM</span>
-<span class="sd">    due to 1/r^2 solar wind density model.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">"""From enterprise_extensions: calculate DM</span>
+<span class="sd">    due to 1/r^2 solar wind density model."""</span>
 
     <span class="n">theta</span><span class="p">,</span> <span class="n">r_earth</span><span class="p">,</span> <span class="n">_</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">theta_impact</span><span class="p">(</span><span class="n">psr</span><span class="p">)</span>
     <span class="n">shape</span> <span class="o">=</span> <span class="n">matrix</span><span class="o">.</span><span class="n">jnparray</span><span class="p">(</span><span class="n">AU_light_sec</span> <span class="o">*</span> <span class="n">AU_pc</span> <span class="o">/</span> <span class="n">r_earth</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sinc</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">theta</span><span class="o">/</span><span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span> <span class="o">*</span> <span class="mf">4.148808e3</span> <span class="o">/</span> <span class="n">psr</span><span class="o">.</span><span class="n">freqs</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>
@@ -581,7 +581,7 @@
 <div class="viewcode-block" id="make_chromaticdelay">
 <a class="viewcode-back" href="../../api/solar.html#discovery.solar.make_chromaticdelay">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">make_chromaticdelay</span><span class="p">(</span><span class="n">psr</span><span class="p">,</span> <span class="n">idx</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;From enterprise_extensions: pre-calculate chromatic exponential-dip delay.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">"""From enterprise_extensions: pre-calculate chromatic exponential-dip delay."""</span>
 
     <span class="n">toadays</span><span class="p">,</span> <span class="n">invnormfreqs</span> <span class="o">=</span> <span class="n">matrix</span><span class="o">.</span><span class="n">jnparray</span><span class="p">(</span><span class="n">psr</span><span class="o">.</span><span class="n">toas</span> <span class="o">/</span> <span class="n">const</span><span class="o">.</span><span class="n">day</span><span class="p">),</span> <span class="n">matrix</span><span class="o">.</span><span class="n">jnparray</span><span class="p">(</span><span class="mf">1400.0</span> <span class="o">/</span> <span class="n">psr</span><span class="o">.</span><span class="n">freqs</span><span class="p">)</span>
 

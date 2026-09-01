@@ -547,7 +547,7 @@
 <a class="viewcode-back" href="../../api/deterministic.html#discovery.deterministic.makedelay_binary">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">makedelay_binary</span><span class="p">(</span><span class="n">pulsarterm</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">delay_binary</span><span class="p">(</span><span class="n">toas</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">log10_h0</span><span class="p">,</span> <span class="n">log10_f0</span><span class="p">,</span> <span class="n">ra</span><span class="p">,</span> <span class="n">sindec</span><span class="p">,</span> <span class="n">cosinc</span><span class="p">,</span> <span class="n">psi</span><span class="p">,</span> <span class="n">phi_earth</span><span class="p">,</span> <span class="n">phi_psr</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;BBH residuals from Ellis et. al 2012, 2013&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">"""BBH residuals from Ellis et. al 2012, 2013"""</span>
 
         <span class="n">h0</span> <span class="o">=</span> <span class="mi">10</span><span class="o">**</span><span class="n">log10_h0</span>
         <span class="n">f0</span> <span class="o">=</span> <span class="mi">10</span><span class="o">**</span><span class="n">log10_f0</span>
@@ -603,14 +603,14 @@
 <div class="viewcode-block" id="makedelay_binary_phases">
 <a class="viewcode-back" href="../../api/deterministic.html#discovery.deterministic.makedelay_binary_phases">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">makedelay_binary_phases</span><span class="p">(</span><span class="n">pulsarterm</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Factory for computing cphase and sphase vectors from binary parameters.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">"""Factory for computing cphase and sphase vectors from binary parameters."""</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">delay_binary_phases</span><span class="p">(</span><span class="n">toas</span><span class="p">,</span> <span class="n">log10_f0</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute cosine and sine phase vectors.</span>
+<span class="w">        </span><span class="sd">"""Compute cosine and sine phase vectors.</span>
 
 <span class="sd">        Returns:</span>
 <span class="sd">            cphase: cosine phase vector (toas,)</span>
 <span class="sd">            sphase: sine phase vector (toas,)</span>
-<span class="sd">        &quot;&quot;&quot;</span>
+<span class="sd">        """</span>
         <span class="n">f0</span> <span class="o">=</span> <span class="mi">10</span><span class="o">**</span><span class="n">log10_f0</span>
         <span class="n">tref</span> <span class="o">=</span> <span class="mf">86400.0</span> <span class="o">*</span> <span class="mf">51544.5</span>  <span class="c1"># MJD J2000 in seconds</span>
 
@@ -628,20 +628,20 @@
 <div class="viewcode-block" id="makedelay_binary_coefficients">
 <a class="viewcode-back" href="../../api/deterministic.html#discovery.deterministic.makedelay_binary_coefficients">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">makedelay_binary_coefficients</span><span class="p">(</span><span class="n">pulsarterm</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Factory for computing coefficients to multiply phase vectors.&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">"""Factory for computing coefficients to multiply phase vectors."""</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">delay_binary_coefficients</span><span class="p">(</span><span class="n">pos</span><span class="p">,</span> <span class="n">log10_h0</span><span class="p">,</span> <span class="n">log10_f0</span><span class="p">,</span> <span class="n">ra</span><span class="p">,</span> <span class="n">sindec</span><span class="p">,</span> <span class="n">cosinc</span><span class="p">,</span> <span class="n">psi</span><span class="p">,</span> <span class="n">phi_earth</span><span class="p">,</span> <span class="n">phi_psr</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compute antenna pattern factors and phase coefficients.</span>
+<span class="w">        </span><span class="sd">"""Compute antenna pattern factors and phase coefficients.</span>
 
 <span class="sd">        Returns:</span>
 <span class="sd">            coeffs: dictionary with keys:</span>
-<span class="sd">                - &#39;fplus&#39;, &#39;fcross&#39;: antenna pattern factors</span>
-<span class="sd">                - &#39;rplus_coeff_c&#39;, &#39;rplus_coeff_s&#39;: coefficients for cphase/sphase in rplus</span>
-<span class="sd">                - &#39;rcross_coeff_c&#39;, &#39;rcross_coeff_s&#39;: coefficients for cphase/sphase in rcross</span>
+<span class="sd">                - 'fplus', 'fcross': antenna pattern factors</span>
+<span class="sd">                - 'rplus_coeff_c', 'rplus_coeff_s': coefficients for cphase/sphase in rplus</span>
+<span class="sd">                - 'rcross_coeff_c', 'rcross_coeff_s': coefficients for cphase/sphase in rcross</span>
 
 <span class="sd">            Full response is reconstructed as:</span>
 <span class="sd">            res = -fplus * (rplus_coeff_c * cphase + rplus_coeff_s * sphase)</span>
 <span class="sd">                  -fcross * (rcross_coeff_c * cphase + rcross_coeff_s * sphase)</span>
-<span class="sd">        &quot;&quot;&quot;</span>
+<span class="sd">        """</span>
         <span class="n">h0</span> <span class="o">=</span> <span class="mi">10</span><span class="o">**</span><span class="n">log10_h0</span>
         <span class="n">f0</span> <span class="o">=</span> <span class="mi">10</span><span class="o">**</span><span class="n">log10_f0</span>
 
@@ -725,8 +725,8 @@
 <div class="viewcode-block" id="cos2comp">
 <a class="viewcode-back" href="../../api/deterministic.html#discovery.deterministic.cos2comp">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">cos2comp</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">df</span><span class="p">,</span> <span class="n">A</span><span class="p">,</span> <span class="n">f0</span><span class="p">,</span> <span class="n">phi</span><span class="p">,</span> <span class="n">t0</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Project signal A * cos(2pi f t + phi) onto Fourier basis</span>
-<span class="sd">    cos(2pi k t/T), sin(2pi k t/T) for t in [t0, t0+T].&quot;&quot;&quot;</span>
+<span class="w">    </span><span class="sd">"""Project signal A * cos(2pi f t + phi) onto Fourier basis</span>
+<span class="sd">    cos(2pi k t/T), sin(2pi k t/T) for t in [t0, t0+T]."""</span>
 
     <span class="n">T</span> <span class="o">=</span> <span class="mf">1.0</span> <span class="o">/</span> <span class="n">df</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
 
@@ -757,7 +757,7 @@
 <a class="viewcode-back" href="../../api/deterministic.html#discovery.deterministic.makefourier_binary">[docs]</a>
 <span class="k">def</span><span class="w"> </span><span class="nf">makefourier_binary</span><span class="p">(</span><span class="n">pulsarterm</span><span class="o">=</span><span class="kc">True</span><span class="p">):</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">fourier_binary</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">df</span><span class="p">,</span> <span class="n">mintoa</span><span class="p">,</span> <span class="n">pos</span><span class="p">,</span> <span class="n">log10_h0</span><span class="p">,</span> <span class="n">log10_f0</span><span class="p">,</span> <span class="n">ra</span><span class="p">,</span> <span class="n">sindec</span><span class="p">,</span> <span class="n">cosinc</span><span class="p">,</span> <span class="n">psi</span><span class="p">,</span> <span class="n">phi_earth</span><span class="p">,</span> <span class="n">phi_psr</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;BBH residuals from Ellis et. al 2012, 2013&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">"""BBH residuals from Ellis et. al 2012, 2013"""</span>
 
         <span class="n">h0</span> <span class="o">=</span> <span class="mi">10</span><span class="o">**</span><span class="n">log10_h0</span>
         <span class="n">f0</span> <span class="o">=</span> <span class="mi">10</span><span class="o">**</span><span class="n">log10_f0</span>
