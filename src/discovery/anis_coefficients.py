@@ -367,50 +367,6 @@ def clm2map(clm, nside):
 
     return h
 
-def alm2clm(alm):
-    """
-    Given an array of complex alm values, return an array of clm values
-
-    PORT FROM ENTERPRISE.ANIS_COEFFICIENTS
-
-    Note: There is a bug in healpy for the negative m values. This function
-    just takes the imaginary part of the abs(m) alm index.
-    Parameters
-    -----------
-    alm : array
-        array of complex alm values
-
-    Returns
-    -------
-    clm : array
-        array of clm values
-    """
-    nalm = len(alm)
-    maxl = int(np.sqrt(9.0 - 4.0 * (2.0 - 2.0 * nalm)) * 0.5 - 1.5)  # Really?
-    nclm = (maxl + 1) ** 2
-
-    # Check the solution. Went wrong one time..
-    if nalm != int(0.5 * (maxl + 1) * (maxl + 2)):
-        raise ValueError("Check numerical precision. This should not happen")
-
-    clm = np.zeros(nclm)
-
-    clmindex = 0
-    for ll in range(0, maxl + 1):
-        for mm in range(-ll, ll + 1):
-            almindex = hp.Alm.getidx(maxl, ll, abs(mm))
-
-            if mm == 0:
-                clm[clmindex] = alm[almindex].real
-            elif mm < 0:
-                clm[clmindex] = -alm[almindex].imag * np.sqrt(2)
-            elif mm > 0:
-                clm[clmindex] = alm[almindex].real * np.sqrt(2)
-
-            clmindex += 1
-
-    return clm
-
 def get_linspharm_basis(pos, lmax, nside=16):
     """generate the linear spherical harmonic basis based on etahat direction
     
@@ -572,10 +528,10 @@ def alm2clm(alm, lmax):
                 clm = clm.at[clmindex].set(alm[almindex].real)
                 #clm[clmindex] = alm[almindex].real
             elif mm < 0:
-                clm = clm.at[clmindex].set((-1) ** mm * alm[almindex].imag * np.sqrt(2))
+                clm = clm.at[clmindex].set(-1 * alm[almindex].imag * np.sqrt(2))
                 #clm[clmindex] = (-1) ** mm * alm[almindex].imag * np.sqrt(2)
             elif mm > 0:
-                clm = clm.at[clmindex].set((-1) ** mm * alm[almindex].real * np.sqrt(2))
+                clm = clm.at[clmindex].set(alm[almindex].real * np.sqrt(2))
                 #clm[clmindex] = (-1) ** mm * alm[almindex].real * np.sqrt(2)
 
             clmindex += 1
@@ -605,7 +561,7 @@ def get_sqrtspharm_orf(pos, lmax, nside=16):
         raise ValueError("lmax must be even for sqrt spherical harmonic basis\nSee https://arxiv.org/abs/2103.00826 for details on why this is the case.")
     # linsph_basis is shape: Nmodes, Npsr, Npsr
     linsph_basis = get_linspharm_basis(pos, lmax, nside) 
-    sqrt_spharm_helper = CG.clebschGordan(blmax = lmax)
+    sqrt_spharm_helper = CG.clebschGordan(blmax = int(lmax/2))
     nblms = (lmax + 1)**2-1 # LSS removing the b00 mode.
 
     @jax.jit
