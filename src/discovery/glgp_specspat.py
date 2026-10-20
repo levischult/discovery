@@ -113,9 +113,9 @@ def makeglobalgp_fourier_specspat(psrs, priors, orfs, components, T, fourierbasi
     f, df = matrix.jnparray(fs[0]), matrix.jnparray(dfs[0])
     psrpos = [matrix.jnparray(psr.pos) for psr in psrs]
 
-
-    def priorfunc(params):
-        # LSS phis is the len=2*nfreq PSD
+    def compprior(params):
+        # LSS this is a compressed Phi matrix that is 2nfreq, npsr, npsr shape
+                # LSS phis is the len=2*nfreq PSD
         # phis = [prior(f, df, *[params[arg] for arg in argmap]) for prior, argmap in zip(priors, argmaps)]
         # print(f'{params=}')
         phis = [] # LSS list of len=2*nfreq PSDs for each spec model.
@@ -156,7 +156,7 @@ def makeglobalgp_fourier_specspat(psrs, priors, orfs, components, T, fourierbasi
                     orfholder.append(matrix.jnparray(orf_i(None, None, *[params[arg] for arg in orfmap_i])))
                 orfmats = jnp.array(orfholder)
                 allorfmats.append(orfmats)
-
+        # print(f'{allorfmats.shape=}')
         # LSS make a 2nfreq, npsr, npsr matrix out of our ORFs
         bigorfmats = []
         for orfmats in allorfmats:
@@ -179,14 +179,23 @@ def makeglobalgp_fourier_specspat(psrs, priors, orfs, components, T, fourierbasi
         # LSS now we need to sum over spectral/spatial model combinations to get
         # the full compressed Phi matrix that is 2nfreq, npsr, npsr shape
         Phicomp = jnp.sum(jnp.array(Phicomps), axis=0)
+        return Phicomp
 
-        #print(Phicomp.shape)
+    def decompprior(Phicomp):
+        # LSS prior must be shape 2Nf, Npsr, Npsr
+        # unwraps to Npsr*2Nf, Npsr*2Nf which is the true Phi shape
 
         # LSS unpack Phi now - this is how michele did it in multiorf code.
         n_diag, n_row_blocks, n_col_blocks = Phicomp.shape
         blocks = jnp.zeros((n_row_blocks, n_col_blocks, n_diag, n_diag))
         blocks = blocks.at[..., jnp.arange(n_diag), jnp.arange(n_diag)].set(Phicomp.transpose(1, 2, 0))
         Phi = blocks.transpose(0, 2, 1, 3).reshape(n_row_blocks*n_diag, n_col_blocks*n_diag)
+        return Phi
+
+
+    def priorfunc(params):
+        Phicomp = compprior(params)
+        Phi = decompprior(Phicomp)
         return Phi
     
     # LSS composing all the params
@@ -204,8 +213,13 @@ def makeglobalgp_fourier_specspat(psrs, priors, orfs, components, T, fourierbasi
     priorfunc.type = jax.Array
 
     def invprior(params):
-        Phi = priorfunc(params)
-        return jnp.linalg.inv(Phi), jnp.linalg.slogdet(Phi)[1]
+        Phicomp = compprior(params) # [2Nf, Npsr, Npsr]
+        # invPhicomp = jnp.zeros_like(Phicomp)
+        invPhicomp = jnp.linalg.inv(Phicomp)
+        invPhi = decompprior(invPhicomp)
+        det = jnp.sum(jnp.linalg.slogdet(Phicomp)[1])
+
+        return invPhi, det
     
     invprior.params = priorfunc.params
     invprior.type = jax.Array

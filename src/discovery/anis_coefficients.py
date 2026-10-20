@@ -339,7 +339,7 @@ def clm2alm(clm):
 
     return alm
 
-def clm2map(clm, nside):
+def clm2map(clm, nside=16, clmswithc00=False):
     """
     generate a healpix map from clm coefficients.
 
@@ -354,14 +354,23 @@ def clm2map(clm, nside):
         Array of C_{lm} values (inc. 0,0 element)
     nside : int
         Nside of the healpix pixelation (resolution parameter)
+    clmswithc00 : bool
+        whether or not c00 is included with the clms passed to func.
+        if False, function will insert c00=sqrt(4*pi)
 
     Returns
     -------
     h : array
         Healpix pixels to be used with healpy functions
     """
-    maxl = int(np.sqrt(len(clm))) - 1
-    alm = clm2alm(clm)
+    if clmswithc00:
+        maxl = int(np.sqrt(len(clm))) - 1
+        clms = clm
+    else:
+        maxl = int(np.sqrt(len(clm)+1)) - 1
+        clms = np.insert(clm, 0, np.sqrt(4*jnp.pi))
+    
+    alm = clm2alm(clms)
 
     h = hp.alm2map(alm, nside, maxl)
 
@@ -409,7 +418,7 @@ def get_linspharm_basis(pos, lmax, nside=16):
         for mm in range(-ll, ll+1):
             clm = np.zeros(nclm)
             clm[clm_idx] = 1.0 
-            skymap = clm2map(clm, nside) # LSS make skymap for idx mode
+            skymap = clm2map(clm, nside, clmswithc00=True) # LSS make skymap for idx mode
             orf = R @ skymap # LSS make ORF from that spharm mode
             # LSS pulsar term is included in R already - see get_pixel_power_basis
             basis.append(orf)
