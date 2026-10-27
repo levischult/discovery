@@ -1,5 +1,9 @@
 import inspect
+import pickle
+from pathlib import Path
 
+import jax
+import jax.numpy as jnp
 import pandas as pd
 
 import numpyro
@@ -7,6 +11,7 @@ from numpyro import infer
 from numpyro import distributions as dist
 
 from .. import prior
+from ..pulsar import save_chain
 
 
 def makemodel_transformed(mylogl, transform=prior.makelogtransform_uniform, priordict={}):
@@ -36,15 +41,159 @@ def makemodel(mylogl, priordict={}):
 
 
 def makesampler_nuts(numpyro_model, num_warmup=512, num_samples=1024, num_chains=1, **kwargs):
-    nutsargs = dict(max_tree_depth=8, dense_mass=False,
-                    forward_mode_differentiation=False, target_accept_prob=0.8,
-                    **{arg: val for arg in kwargs.items() if arg in inspect.getfullargspec(infer.NUTS).args})
+    nuts_argnames = set(inspect.signature(infer.NUTS).parameters) - {"model"}
+    mcmc_argnames = set(inspect.signature(infer.MCMC).parameters) - {"sampler"}
 
-    mcmcargs = dict(num_warmup=num_warmup, num_samples=num_samples, num_chains=num_chains,
-                    chain_method='vectorized', progress_bar=True,
-                    **{arg: val for arg in kwargs.items() if arg in inspect.getfullargspec(infer.MCMC).kwonlyargs})
+    unknown = set(kwargs) - nuts_argnames - mcmc_argnames
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        raise TypeError(f"makesampler_nuts() got unexpected keyword argument(s): {names}")
+
+    nutsargs = {
+        "max_tree_depth": 8,
+        "dense_mass": False,
+        "forward_mode_differentiation": False,
+        "target_accept_prob": 0.8,
+    }
+    nutsargs.update({name: value for name, value in kwargs.items() if name in nuts_argnames})
+
+    mcmcargs = {
+        "num_warmup": num_warmup,
+        "num_samples": num_samples,
+        "num_chains": num_chains,
+        "chain_method": "vectorized",
+        "progress_bar": True,
+    }
+    mcmcargs.update({name: value for name, value in kwargs.items() if name in mcmc_argnames})
 
     sampler = infer.MCMC(infer.NUTS(numpyro_model, **nutsargs), **mcmcargs)
     sampler.to_df = lambda: numpyro_model.to_df(sampler.get_samples())
 
     return sampler
+
+
+def _ensure_sampler_to_df(sampler):
+    """Attach ``sampler.to_df`` from the underlying model when missing.
+
+    ``makesampler_nuts`` already wires this. For a raw ``numpyro.infer.MCMC``
+    built around a model that defines ``to_df``, recover the same attachment
+    from ``sampler.sampler.model``. Otherwise raise a clear error.
+    """
+    if hasattr(sampler, "to_df") and callable(getattr(sampler, "to_df")):
+        return
+
+    kernel = getattr(sampler, "sampler", None)
+    model = getattr(kernel, "model", None)
+    if model is not None and hasattr(model, "to_df") and callable(model.to_df):
+        sampler.to_df = lambda s=sampler, m=model: m.to_df(s.get_samples())
+        return
+
+    raise AttributeError(
+        "sampler has no to_df; build it with makesampler_nuts(...) "
+        "or use a NumPyro model that defines to_df "
+        "(makesampler_nuts / run_nuts_with_checkpoints will attach it)"
+    )
+
+
+def run_nuts_with_checkpoints(
+    sampler,
+    num_samples_per_checkpoint,
+    rng_key,
+    outdir="chains",
+    resume=False,
+):
+    """Run NumPyro MCMC and save checkpoints.
+
+    This function performs multiple iterations of MCMC sampling, saving checkpoints
+    after each iteration. It saves samples to feather files and the NumPyro MCMC
+    state to a pickle.
+
+    Preferred construction is :func:`makesampler_nuts`, which attaches
+    ``sampler.to_df`` from the model's ``to_df``. If ``sampler.to_df`` is
+    missing but the underlying NUTS kernel's ``.model`` defines ``to_df``,
+    that attachment is recovered automatically.
+
+    Parameters
+    ----------
+    sampler : numpyro.infer.MCMC
+        A NumPyro MCMC sampler object.
+    num_samples_per_checkpoint : int
+        The number of samples to save in each checkpoint.
+    rng_key : jax.random.PRNGKey
+        The random number generator key for JAX.
+    outdir : str | Path
+        The directory for output files.
+    resume : bool
+        Whether to look for a state to resume from.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The concatenated sample table written to ``numpyro-samples.feather``.
+
+    Side Effects
+    ------------
+    - Runs the MCMC sampler for the number of iterations required to reach the total sample number.
+    - Saves samples data to feather files after each iteration.
+    - Writes the NumPyro sampler state to a pickle file after each iteration.
+
+    Example
+    -------
+    >>> import discovery.samplers.numpyro as ds_numpyro
+    >>> # Assume `model` is configured
+    >>> npsampler = ds_numpyro.makesampler_nuts(model, num_samples=100, num_warmup=50)
+    >>> ds_numpyro.run_nuts_with_checkpoints(npsampler, 10, jax.random.key(42))
+
+    """
+    _ensure_sampler_to_df(sampler)
+
+    outdir = Path(outdir)
+    outdir.mkdir(exist_ok=True, parents=True)
+
+    samples_file = outdir / "numpyro-samples.feather"
+    checkpoint_file = outdir / "numpyro-checkpoint.pickle"
+
+    if checkpoint_file.is_file() and samples_file.is_file() and resume:
+        df = pd.read_feather(samples_file)
+        num_samples_saved = df.shape[0]
+
+        with checkpoint_file.open("rb") as f:
+            checkpoint = pickle.load(f)
+
+        total_sample_num = sampler.num_samples - num_samples_saved
+
+        sampler.post_warmup_state = checkpoint
+
+    else:
+        df = None
+        num_samples_saved = 0
+        total_sample_num = sampler.num_samples
+
+    num_checkpoints = int(jnp.ceil(total_sample_num / num_samples_per_checkpoint))
+    remainder_samples = int(total_sample_num % num_samples_per_checkpoint)
+
+    for checkpoint in range(num_checkpoints):
+        if checkpoint == 0:
+            sampler.num_samples = num_samples_per_checkpoint
+            sampler._set_collection_params()  # Need this to update num_samples
+        elif checkpoint == num_checkpoints - 1:
+            # We won't need to update the collection params because we've set the post warmup state,
+            # and that accomplishes the same goal.
+            sampler.num_samples = remainder_samples if remainder_samples != 0 else num_samples_per_checkpoint
+
+        sampler.run(rng_key)
+
+        df_new = sampler.to_df()
+
+        df = pd.concat([df, df_new]) if df is not None else df_new
+
+        save_chain(df, samples_file)
+
+        with checkpoint_file.open("wb") as f:
+            pickle.dump(sampler.last_state, f)
+
+        sampler.post_warmup_state = sampler.last_state
+
+        rng_key, _ = jax.random.split(rng_key)
+
+    return df

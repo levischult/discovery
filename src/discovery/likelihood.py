@@ -1,4 +1,5 @@
 import functools
+from typing import Callable
 # from dataclasses import dataclass
 
 import numpy as np
@@ -129,6 +130,7 @@ class PulsarLikelihood:
     def conditional(self):
         if self.delay:
             raise NotImplementedError('No PulsarLikelihood.conditional with delays so far.')
+
         # if there's only one woodbury to do (N + T Phi T)
         # as opposed to (N + T Phi T + ... + T Phi T)
         N_Nmat = self.N.N_var if hasattr(self.N, 'N_var') else self.N.N
@@ -142,9 +144,11 @@ class PulsarLikelihood:
             def cond(params):
                 mu, cf = ksolve(params)
                 return mu, cf
-            cond.params = sorted(N_Nmat.params + self.N.P_var.params)
+            # ksolve.params already unions N_var, P_var and any parameters the
+            # design matrix depends on (e.g. a free chromatic index).
+            cond.params = ksolve.params
             return cond
-        P_var_inv = self.N.P_var.Phi_inv or self.N.P_var.make_inv()
+        P_var_inv = getattr(self.N.P_var, 'Phi_inv', None) or self.N.P_var.make_inv()
 
         ksolve = N_Nmat.make_kernelsolve(self.y, self.N.F)
 
@@ -170,7 +174,7 @@ class PulsarLikelihood:
 
                 return mu, cf
 
-            cond.params = sorted(ksolve.params) + P_var_inv.params
+            cond.params = sorted(set(ksolve.params + P_var_inv.params))
 
         return cond
 
@@ -199,7 +203,32 @@ class PulsarLikelihood:
             return make_sample
 
         return self.N.make_sample()
-
+    
+    @functools.cached_property
+    def white_noise_matrix(self):
+        """
+        Return the diagonal white noise matrix for this pulsar.
+        It will be scaled by EFAC and ECORR, but will NOT include EQUAD."""
+        def _return_next_layer_or_wn(obj):
+            """
+            for sorting through the depths of this model
+            """
+            if isinstance(obj, np.ndarray):
+                return obj
+            if hasattr(obj, 'N'): 
+                return obj.N
+            elif hasattr(obj, 'N_var'):
+                return obj.N_var
+            elif hasattr(obj, 'getN'):
+                return obj.getN
+        obj = self
+        # keep going until we hit a function
+        # or an array
+        while not isinstance(obj, np.ndarray) and not isinstance(obj, Callable):
+            if isinstance(obj, matrix.NoiseMatrixSM_novar) or isinstance(obj, matrix.NoiseMatrixSM_var):
+                print("WARNING: Kernel ecorr is included, but the 'white_noise_matrix' property just returns the diagonal, scaled TOA errors")
+            obj = _return_next_layer_or_wn(obj)
+        return obj
 
 class GlobalLikelihood:
     def __init__(self, psls, globalgp=None):
@@ -263,7 +292,7 @@ class GlobalLikelihood:
                 # ys = [key, _ := sl(key, params) + jnp.dot(F, c[slc]) for sl, F, slc in zip(sls, Fs, slcs)]
                 return key, ys
 
-            sampler.params = sorted(set.union(*[set(sl.params) for sl in sls])) + Phi_sample.params
+            sampler.params = sorted(set(sum([sl.params for sl in sls], []) + Phi_sample.params))
 
         return sampler
 
@@ -325,7 +354,7 @@ class GlobalLikelihood:
 
             params_kterms = list(set.union(*[set(kterm.params) for kterm in kterms]))
             params_kmeans = kmeans.params if kmeans is not None else []
-            loglike.params = sorted(params_kterms + params_kmeans + P_var_inv.params)
+            loglike.params = sorted(set(params_kterms + params_kmeans + P_var_inv.params))
 
         return loglike
 
@@ -492,7 +521,7 @@ class GlobalLikelihood:
                     return mu, cf
                     # return mu, cf, phiinv, tnt
 
-                cond.params = sorted(set.union(*[set(ksolve.params) for ksolve in ksolves])) + P_var_inv.params
+                cond.params = sorted(set(sum([ksolve.params for ksolve in ksolves], []) + P_var_inv.params))
 
         return cond
 
@@ -614,7 +643,7 @@ class ArrayLikelihood:
                 return logp
 
             params_kmeans = kmeans.params if kmeans is not None else []
-            loglike.params = sorted(kterms.params + params_kmeans + P_var_inv.params)
+            loglike.params = sorted(set(kterms.params + params_kmeans + P_var_inv.params))
 
         return loglike
 
@@ -735,6 +764,6 @@ class ArrayLikelihood:
                 else:
                     raise ValueError("Unknown logdet method: {}".format(make_logdet))
 
-            loglike.params = sorted(kterms.params + factors.params)
+            loglike.params = sorted(set(kterms.params + factors.params))
 
         return loglike
