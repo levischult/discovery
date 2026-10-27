@@ -620,7 +620,45 @@ def get_sqrtspharm_orf(pos, lmax, nside=16):
         return orf
     return sqrtsph_orf
 
+@jax.jit(static_argnames=['lmax'])
+def blmparams2clms(blm_params, lmax):
+    """
+    convert blm_params to clms. 
 
+    blm_params are the amplitude and phase of the complex blm values, with b00 set internally.
+    clms are the real spherical harmonic coefficients.
+
+    Parameters
+    ----------
+    blm_params : array
+        array of blm parameters, shape (2*((lmax+1)^2)-1,)
+    lmax : int
+        lmax for spherical harmonic basis. The number of modes will be (lmax+1)^2
+
+    Returns
+    -------
+    clms : array
+        array of clm values, shape ((lmax+1)^2,)
+    """
+    if lmax % 2 != 0:
+        raise ValueError("lmax must be even for sqrt spherical harmonic basis\nSee https://arxiv.org/abs/2103.00826 for details on why this is the case.")
+    
+    sqrt_spharm_helper = CG.clebschGordan(blmax = int(lmax/2))
+    
+    # 1. convert the blm_params (separate amplitude and phase) to complex blm
+    blm = sqrt_spharm_helper.blm_params_2_blms(blm_params)
+
+    # 2. convert the complex blm to complex alm
+    alm = sqrt_spharm_helper.blm_2_alm(blm)
+
+    # 3. convert the complex alm to real clm values
+    clms = alm2clm(alm, lmax=lmax)
+
+    # 4. multiply the clm values by the precomputed linear spherical harmonic basis to get the orf
+    # LSS need to normalize so c00 is sqrt(4*pi) and the rest of the clm values are normalized accordingly
+    clm_norm = clms * (jnp.sqrt(4*jnp.pi) / clms[0])
+
+    return clm_norm
 
 def get_pixel_orf(psrpos, nside=16):
     """outer function to get orf for pixelated skymap.
