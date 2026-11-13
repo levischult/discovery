@@ -15,6 +15,8 @@ import pickle as pkl
 import pathlib
 import sys
 sys.path.append(str(pathlib.Path(__file__).parent.resolve()))
+from numpyro.infer.util import initialize_model
+import numpyro
 
 import clebschGordan as CG
 
@@ -777,7 +779,80 @@ def get_principalmap_orf(fullbasis, n_sv=None, perc_sv=None):
         orf = Tp@amps
         return orf
     return principalmap_orf, Vp
-    
+
+def find_map(model, rng_key, Nsteps, lr, Nchains=1):
+    '''
+    Adam-optimize a numpyro model to its mode in unconstrained space, for use as a NUTS starting point.
+
+    The objective is numpyro's potential_fn: -log density in unconstrained space *including* the Jacobian
+    of the prior transform, i.e. exactly the density NUTS samples. The optimum is therefore always strictly
+    inside the prior bounds. Each chain is optimized independently from its own random start.
+
+    Arguments
+    ------------------------------
+    model : callable
+        numpyro model taking no arguments (bind data/args with a closure or functools.partial).
+    rng_key : jax.random.PRNGKey
+        Key used to draw the per-chain random starting points.
+    Nsteps : int
+        Number of Adam steps per chain.
+    lr : float
+        Adam learning rate (step size in unconstrained space).
+    Nchains : int
+        Number of independent starts to optimize; match MCMC(num_chains=...).
+
+    Returns
+    ------------------------------
+    init_params : dict
+        Optimized latent values in unconstrained space, keyed by sample site. Leading (Nchains,) dim if
+        Nchains > 1, none if Nchains == 1 -- the layout MCMC.run(init_params=...) expects.
+    map_values : dict
+        Constrained values of all sample and deterministic sites at the optimum, each with a leading (Nchains,) dim.
+    logp_trace : numpy.ndarray
+        Unconstrained-space log density before each Adam step, shape (Nchains, Nsteps). Use to check convergence.
+    '''
+    ## batched keys -> one init_to_uniform draw (U[-2,2] in unconstrained space) per chain;
+    ## z0 gets a leading (Nchains,) dim, while potential_fn/postprocess_fn act on a single chain
+    model_info = initialize_model(jax.random.split(rng_key, Nchains), model)
+    z0 = model_info.param_info.z
+    potential_fn = model_info.potential_fn
+
+    optimizer = numpyro.optim.Adam(step_size=lr)
+
+    def optimize_chain(z_init):
+        '''Run Nsteps of Adam from one start; return the optimum, its potential, and the per-step log density.'''
+        def adam_step(opt_state, _):
+            ## the potential comes for free with the gradient, so record it as the convergence trace
+            pe, grads = jax.value_and_grad(potential_fn)(optimizer.get_params(opt_state))
+            return optimizer.update(grads, opt_state), -pe
+        opt_state, logp = jax.lax.scan(adam_step, optimizer.init(z_init), None, length=Nsteps)
+        z_opt = optimizer.get_params(opt_state)
+        return z_opt, potential_fn(z_opt), logp
+
+    ## lax.map runs chains sequentially under one compilation, so memory stays at one likelihood
+    ## evaluation (vmap could exhaust GPU memory for large models)
+    print(f"Optimizing to MAP ({Nchains} chain(s), {Nsteps} steps each)...")
+    z_map, pe_map, logp_trace = jax.jit(lambda z: jax.lax.map(optimize_chain, z))(z0)
+    pe_map, logp_trace = np.asarray(pe_map), np.asarray(logp_trace)
+
+    ## fall back to the random start for any chain whose optimization diverged
+    failed = ~np.isfinite(pe_map)
+    if np.any(failed):
+        print(f"WARNING: non-finite log density for chain(s) {np.flatnonzero(failed)}; reverting them to their random starts.")
+        ## broadcast the (Nchains,) mask against each site's (Nchains, ...) shape
+        z_map = jax.tree.map(lambda zm, zi: jnp.where(failed.reshape((-1,) + (1,) * (zm.ndim - 1)), zi, zm), z_map, z0)
+    for i in range(Nchains):
+        print(f"    Chain {i}: log density at MAP = {-pe_map[i]:.6g}")
+
+    ## constrained values of every sample/deterministic site; lax.map rather than vmap since
+    ## deterministic sites may re-run the likelihood
+    map_values = jax.tree.map(np.asarray, jax.lax.map(model_info.postprocess_fn, z_map))
+
+    ## numpyro expects no chain dim for a single chain
+    if Nchains == 1:
+        z_map = jax.tree.map(lambda x: x[0], z_map)
+
+    return z_map, map_values, logp_trace
 
 # Eigenbasis and SVD functions--------------------------------------------------
 def compute_basis_SVD(T, pair_representation=False):
