@@ -1,24 +1,16 @@
+from . import const
+from . import deterministic as dsd
+from . import clebschGordan as CG
+from . import anis_utils as dau
+
 import jax.numpy as jnp
 import typing
 import numpy as np
 import healpy as hp
-import scipy.special as ss
-import discovery.deterministic as dsd
-#from discovery.deterministic import fpc_fast
-from time import time_ns
 import jax
-from jax.scipy import linalg as jsl
-import pandas as pd
-import re
 import jax_healpy as jhp
-import pickle as pkl
-import pathlib
-import sys
-sys.path.append(str(pathlib.Path(__file__).parent.resolve()))
-from numpyro.infer.util import initialize_model
 import numpyro
-
-import clebschGordan as CG
+from numpyro.infer.util import initialize_model
 
 
 """
@@ -35,20 +27,7 @@ Khat - unit vector pointing in the direction of GW propagation (source to observ
 etahat - unit vector pointing in the direction of the GW source (observer to source)
 """
 
-# Constants
-DAY_SEC = 86400.0  # Number of seconds in a day
-YEAR_SEC = (365.24 * 24 * 3600)  # Number of seconds in a year
-F_YEAR_HZ = 1.0 / YEAR_SEC  # Frequency of 1/year in Hz
-
-C_MPS = 299792458.0  # Speed of light in m/s
-
-PC_M = 3.085677581491367e+16  # Parsec in meters
-KPC_M = PC_M * 1e3  # Kiloparsec in meters
-MPC_M = PC_M * 1e6  # Megaparsec in meters
-
-T_SUN_SEC = 4.9254909476412675e-06 # Solar mass time in seconds
-
-def fpc_fast(pos, gwtheta, gwphi):
+def fpc_faster(pos, gwtheta, gwphi):
     """Get the Fplus and Fcross antenna response functions
 
     This function returns a tuple containing the Fplus and Fcross antenna response
@@ -102,85 +81,6 @@ def fpc_fast(pos, gwtheta, gwphi):
 
     return fplus, fcross # Both are (N,M)
 
-# Utility functions for other methods
-def spherical2cartesian(theta, phi):
-    """Convert spherical coordinates to unit-radius Cartesian coordinates.
-
-    This function takes spherical coordinates (theta, phi) and converts them
-    to Cartesian coordinates (x, y, z) on the unit sphere.
-
-    This function supports array inputs for theta and phi.
-
-    Parameters
-    ----------
-    theta : float or array_like
-        The polar angle in radians.
-    phi : float or array_like
-        The azimuthal angle in radians.
-
-    Returns
-    -------
-    jnp.ndarray
-        The coordinates in an array of shape (..., 3)
-    """
-    x = jnp.sin(theta) * jnp.cos(phi)
-    y = jnp.sin(theta) * jnp.sin(phi)
-    z = jnp.cos(theta)
-    return jnp.array([x, y, z]).T
-
-
-def cartesian2spherical(pos):
-    """Convert Cartesian coordinates to spherical coordinates.
-
-    This function takes Cartesian coordinates (x, y, z) and converts them
-    to spherical coordinates (theta, phi). This function supports vectorized
-    inputs for pos.
-
-    Parameters
-    ----------
-    pos : array_like
-        The Cartesian coordinates. Shape (N, 3)
-
-    Returns
-    -------
-    tuple
-        The spherical coordinates (theta, phi). Both are of shape (N,)
-    """
-
-    x, y, z = pos.T
-    r = jnp.sqrt(x**2 + y**2 + z**2)
-
-    theta = jnp.arccos(z / r)
-    phi = jnp.arctan2(y, x) % (2 * jnp.pi)
-
-    return theta, phi
-
-
-def pairs2matrix(M):
-    # M has (npairs, N) -> return Mp with (N, npsr, npsr)
-    npair = M.shape[0] # number of pairs
-    nbasis = M.shape[1] # number of basis functions
-    npsr = int(jnp.sqrt(0.25 + 2*npair) - 0.5) # Smaller root of quadratic formula
-
-    Mprime = jnp.zeros((npsr, npsr, nbasis))
-    a,b = jnp.triu_indices(npsr, k=0)
-    Mprime = Mprime.at[a, b, :].set(M)
-    Mprime = Mprime.at[b, a, :].set(M)
-
-    return Mprime
-
-
-def matrix2pairs(M):
-    # M has shape (npsr, npsr, N) -> return Mp with (npairs, N)
-    npsr = M.shape[1]
-    nbasis = M.shape[-1]
-    npair = npsr*(npsr+1)//2
-
-    Mprime = jnp.zeros((npair, nbasis))
-    a,b = jnp.triu_indices(npsr, k=0)
-    Mprime = Mprime.at[:, :].set(M[a, b, :])
-
-    return Mprime
 
 def get_pixel_power_basis(pos, nside=16):
 
@@ -191,7 +91,7 @@ def get_pixel_power_basis(pos, nside=16):
     eta_theta, eta_phi = hp.pix2ang(nside, jnp.arange(npix))
     
     # Get Fplus and Fcross
-    fp, fc = fpc_fast(pos, eta_theta, eta_phi) # Each are (N, npix)
+    fp, fc = fpc_faster(pos, eta_theta, eta_phi) # Each are (N, npix)
 
     # Get the pulsars a and b
     a,b = jnp.triu_indices(npsr, k=0) # Includes diagonal
@@ -202,7 +102,7 @@ def get_pixel_power_basis(pos, nside=16):
     R = R * 3/(2*npix) # (Npairs, npix)
 
     # Convert to square covariance matrix
-    Rcov = pairs2matrix(R)  # Shape (npsr, npsr, npix)
+    Rcov = dau.pairs2matrix(R)  # Shape (npsr, npsr, npix)
 
     # Double the diagonal elements for pulsar term
     idx = jnp.arange(npsr)
@@ -236,7 +136,7 @@ def get_pixsearch_orf(pos, nside=16):
     npix = hp.nside2npix(nside)
 
     # LSS get the pixel power response matrix
-    R = get_pixel_power_basis(pos, nside) # (npix, npsr, npsr)
+    R = get_pixel_power_basis(pos, nside) # (npsr, npsr, npix)
 
     # LSS multiply by Npix to put all power in each pixel individually
     # (only using one ORF at a time)
@@ -289,7 +189,7 @@ def get_pixel_strain_basis(pos, nside=16):
     eta_theta, eta_phi = hp.pix2ang(nside, jnp.arange(npix))
 
     # Get Fplus and Fcross
-    fp, fc = fpc_fast(pos, eta_theta, eta_phi) # Each are (N, npix)
+    fp, fc = fpc_faster(pos, eta_theta, eta_phi) # Each are (N, npix)
 
     F = jnp.zeros((npsr, 2*npix)) # Interleave fplus and fcross
     F = F.at[:, 0::2].set(fp)
@@ -482,33 +382,6 @@ def get_linspharm_orf(pos, lmax, nside=16):
         return orf
     return linsph_orf
 
-def hp_Alm_getidx(lmax, l, m):
-    r"""Returns index corresponding to (l,m) in an array describing alm up to lmax.
-
-    LSS - taken from healpy to bypass the fact that the rest of the Alm class isn't jaxified.
-
-    In HEALPix C++ and healpy, :math:`a_{lm}` coefficients are stored ordered by
-    :math:`m`. I.e. if :math:`\ell_{max}` is 16, the first 16 elements are
-    :math:`m=0, \ell=0-16`, then the following 15 elements are :math:`m=1, \ell=1-16`,
-    then :math:`m=2, \ell=2-16` and so on until the last element, the 153th, is
-    :math:`m=16, \ell=16`.
-
-    Parameters
-    ----------
-    lmax : int
-        The maximum l, defines the alm layout
-    l : int
-        The l for which to get the index
-    m : int
-        The m for which to get the index
-
-    Returns
-    -------
-    idx : int
-        The index corresponding to (l,m)
-    """
-    return m * (2 * lmax + 1 - m) // 2 + l
-
 def alm2clm(alm, lmax):
     """A function to convert complex alm values to clm values.
 
@@ -535,7 +408,8 @@ def alm2clm(alm, lmax):
     clmindex = 0
     for ll in range(0, lmax + 1):
         for mm in range(-ll, ll + 1):
-            almindex = hp_Alm_getidx(lmax, ll, abs(mm))
+            almindex = abs(mm) * (2 * lmax + 1 - abs(mm)) // 2 + ll
+
             if mm == 0:
                 clm = clm.at[clmindex].set(alm[almindex].real)
                 #clm[clmindex] = alm[almindex].real
@@ -733,9 +607,9 @@ def get_principalmap_pixelbasis_orf(pos, n_sv=None, perc_sv=None, nside=16):
         _description_
     """
     R = get_pixel_power_basis(pos, nside=nside)
-    Rpair = matrix2pairs(R)
+    Rpair = dau.matrix2pairs(R)
     Tp_pair, Vp = truncate_basis_SVD(Rpair, pair_representation=True, n_sv=n_sv, perc_sv=perc_sv)
-    Tp = pairs2matrix(Tp_pair)
+    Tp = dau.pairs2matrix(Tp_pair)
     @jax.jit
     def principalmap_orf(pos1, pos2, amps : typing.Sequence):
         orf = Tp@amps
@@ -774,7 +648,7 @@ def get_principalmap_orf(fullbasis, n_sv=None, perc_sv=None):
         raise ValueError(f"fullbasis must be a 2D array with shape: npairs, nbasis. Got shape {fullbasis.shape}")
     
     Tp_pair, Vp = truncate_basis_SVD(fullbasis, n_sv=n_sv, perc_sv=perc_sv)
-    Tp = pairs2matrix(Tp_pair)
+    Tp = dau.pairs2matrix(Tp_pair)
     @jax.jit
     def principalmap_orf(pos1, pos2, amps : typing.Sequence):
         orf = Tp@amps
@@ -860,7 +734,7 @@ def compute_basis_SVD(T, pair_representation=False):
     if pair_representation:
         R = T  # Shape (npairs, nbasis)
     else:
-        R = matrix2pairs(T)  # Shape (npairs, nbasis)
+        R = dau.matrix2pairs(T)  # Shape (npairs, nbasis)
 
     U,S,Vt = jnp.linalg.svd(R) 
     # m = min(npairs, nbasis)
@@ -903,79 +777,6 @@ def truncate_basis_SVD(T, pair_representation=False, n_sv=None, perc_sv=None):
     Vtp = Vtp  # Shape (n_sv, nbasis)
     return Tp, Vtp  # Tp: (npairs, n_sv), Vtp: (n_sv, nbasis)
 
-# LSS this really shouldn't be here but I need to save it somewhere
-def npyrosamples2pddf(samples, special_pars=None):
-    """convert numpyro samples dict to pandas dataframe. Handles special parameters that are arrays.
-
-    Parameters
-    ----------
-    samples : dict
-        Dictionary of numpyro samples. e.g. samples = mcmc.get_samples()
-    special_pars : list of strings, optional
-        List of parameter names that are arrays e.g. gw_clm(8), by default None
-    Returns
-    -------
-    pdsamp : pandas.DataFrame
-        DataFrame of samples with special parameters expanded into individual columns.
-    """
-    parsamp = list(samples['params'].keys())
-    if special_pars is not None:
-        [parsamp.remove(sp) for sp in special_pars]
-    holddict = {par: samples['params'][par] for par in parsamp}
-    pdsamp = pd.DataFrame.from_dict(holddict)
-    if special_pars is not None:
-        for sp in special_pars:
-            regsrch = re.search(r'\([0-9]+\)', sp)
-            if regsrch is not None:
-                n_sp = regsrch.group()
-                n_sp = int(n_sp[1:-1])
-                trimparname = re.sub(r'\([0-9]+\)', '', sp)
-            else:
-                raise Exception('Number of params in array not specified.\nParameters expected to have form param_name(N) if in array.')
-            for i in range(n_sp):
-                pdsamp[f'{trimparname}({i})'] = samples['params'][sp][:, i]
-    return pdsamp
-
-def plot_pulsars(dataset, highlight=None, returnphitheta=False):
-    '''
-    plots pulsar positions from a dataset pkl 
-    if you want to save the pulsar positions, set returnphitheta=True
-    
-    inputs:
-    dataset (str): path to dataset
-    highlight (list): list of pulsar names as strings
-
-    outputs:
-    psrphis (array): phi of pulsars
-    psrthetas (array): theta of pulsars
-
-    usage:
-    psrphis, psrthetas = pulsarphitheta('location/of/dataset.pkl')
-    '''
-    # bringing in pulsars 
-    try:
-        with open(dataset , 'rb') as ff:
-            psrs1 = pkl.load(ff)
-    except TypeError:
-        psrs1 = dataset # LSS if the dataset is already a list of pulsars, just use it directly
-    # LSS getting psr locations
-    psrphis = np.array([psr.phi for psr in psrs1])
-    psrthts = np.array([psr.theta for psr in psrs1])
-    # LSS plotting
-    hp.visufunc.projscatter(psrthts, psrphis,
-                    marker='*',color='white',
-                    edgecolors='k',s=100)
-    if highlight is not None:
-        psrnames = [p.name for p in psrs1] # LSS highlight pulsars based on name
-        highlight_idx = []
-        for n in highlight:
-            highlight_idx.append(psrnames.index(n))
-        hp.visufunc.projscatter(np.array(psrthts)[highlight_idx], 
-                                np.array(psrphis)[highlight_idx],
-                    marker='*',color='yellow',
-                    edgecolors='k',s=100)
-    if returnphitheta:
-        return psrphis, psrthts
 
 def lmax2l_order(lmax=6):
     """returns list of clm indices grouped by l (lm_index) and list of clms denoted by l (l_order)
@@ -1089,92 +890,4 @@ def invert_pixel_map(pix_map):
     inv = hp.vec2pix(nside, x_inv, y_inv, z_inv)
 
     return pix_map[inv]
-
-def chain_skymap(phi, theta, nside, ct=False):
-    '''
-    makes an array of pixel values for healpy plotting from sky location posteriors
-
-    inputs:
-    phi (array/list): burned chain of phi samples from mcmc analysis
-    costheta (array/list): burned chain of costheta samples from mcmc analysis
-    nside (int): should be power of 2 - the resolution of output healpy map (12Nside**2)
-    ct (bool): default false - if you want to pass in costheta directly, set to True.
-
-    outputs:
-    skymap - an array of pixel values to be passed to hp.mollview or other proj.
-    '''
-    npix = hp.nside2npix(nside)
-
-    # convert to HEALPix indices
-    if ct:
-        indices = hp.ang2pix(nside, np.arccos(theta), phi)
-    else: indices = hp.ang2pix(nside, theta, phi)
-
-    idx, counts = np.unique(indices, return_counts=True)
-
-    # fill the fullsky map
-    hpx_map = np.zeros(npix, dtype=float)
-    normcts = counts / np.sum(counts) # LSS normalizing
-    hpx_map[idx] = normcts
-
-    return hpx_map
-
-
-# Utility functions to keep doc comments when jitting
-def jit_method(func):
-    """A wrapper to JIT compile class methods with a static 'self' as first argument.
-
-    This decorator takes a class method and returns a JIT compiled version of it
-    while preserving the original function's metadata using functools.wraps.
-
-    This is a drop-in replacement for: `@partial(jit, static_argnums=0)`
-
-    Parameters
-    ----------
-    func : callable
-        The function to be wrapped and JIT compiled.
-
-    Returns
-    -------
-    callable
-        The JIT compiled version of the input function.
-    """
-    from jax import jit
-    from functools import wraps
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        jit_func = jit(func, static_argnums=0) # self is static
-        return jit_func(*args, **kwargs)
-    
-    return wrapper
-
-
-def jit_function(func):
-    """A wrapper to JIT compile standalone functions.
-
-    This decorator takes a standalone function and returns a JIT compiled version
-    of it while preserving the original function's metadata using functools.wraps.
-
-    This is a drop-in replacement for: `@jit`
-
-    Parameters
-    ----------
-    func : callable
-        The function to be wrapped and JIT compiled.
-
-    Returns
-    -------
-    callable
-        The JIT compiled version of the input function.
-    """
-    from jax import jit
-    from functools import wraps
-
-    @wraps(func)
-    def wrapper(*args, **kwargs):
-        jit_func = jit(func)
-        return jit_func(*args, **kwargs)
-    
-    return wrapper
 
