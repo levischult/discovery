@@ -365,6 +365,7 @@ def clm2map(clm, nside=16, clmswithc00=False):
     h : array
         Healpix pixels to be used with healpy functions
     """
+    clm = np.asarray(clm, dtype=np.float64)
     if clmswithc00:
         maxl = int(np.sqrt(len(clm))) - 1
         clms = clm
